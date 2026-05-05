@@ -64,7 +64,7 @@ jobs:
           docker push $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
 
-  DEPLOY:
+    DEPLOY:
     needs: BUILD_AND_PUBLISH
     runs-on: ubuntu-latest
     steps:
@@ -84,3 +84,37 @@ jobs:
                    --query "clusters[?starts_with(@, '$EKS_CLUSTER')] | [0]" \
                    --output text)
           echo "name=$NAME" >> $GITHUB_OUTPUT
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region $AWS_REGION --name ${{ steps.cluster.outputs.name }}
+
+      - name: Install NGINX Ingress Controller
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/aws/deploy.yaml
+          kubectl wait --namespace ingress-nginx \
+            --for=condition=ready pod \
+            --selector=app.kubernetes.io/component=controller \
+            --timeout=300s
+
+      - name: Create ECR pull secret
+        run: |
+          kubectl delete secret regcred --ignore-not-found
+          kubectl create secret docker-registry regcred \
+            --docker-server=${{ secrets.REGISTRY }} \
+            --docker-username=AWS \
+            --docker-password=$(aws ecr get-login-password --region $AWS_REGION)
+
+      - name: Deploy with Helm
+        uses: bitovi/github-actions-deploy-eks-helm@v1.2.10
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          cluster-name: ${{ steps.cluster.outputs.name }}
+          chart-path: helm/vprofilecharts
+          namespace: default
+          name: vprofile-stack
+          values: appimage=${{ secrets.REGISTRY }}/${{ env.ECR_REPOSITORY }},apptag=${{ github.run_number }}
+
+      - name: Print app URL
+        run: |
+          echo "Checking load balancer..."
+          kubectl get ingress
