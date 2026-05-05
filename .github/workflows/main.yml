@@ -64,7 +64,7 @@ jobs:
           docker push $REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
 
-    DEPLOY:
+  DEPLOY:
     needs: BUILD_AND_PUBLISH
     runs-on: ubuntu-latest
     steps:
